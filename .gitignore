@@ -1,0 +1,23 @@
+# Local credentials and configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+kubeconfig*
+*credentials*
+
+# IDE and local artifacts
+.idea/
+.vscode/
+.cache/
+**/.cache/
+**/.gocache/
+bin/
+*.exe
+*.test
+*.log
+.DS_Store
+Thumbs.db

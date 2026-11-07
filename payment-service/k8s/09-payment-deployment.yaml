@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment # Тип ресурса: управляет жизненным циклом Pod'ов через ReplicaSet
+metadata:
+  name: payment-service # Имя Deployment
+  namespace: payments # Namespace, где будет создан ресурс
+  labels:
+    app: payment-service # Метка ресурса для группировки/поиска
+spec: # Желаемое состояние Deployment: реплики, selector и шаблон Pod'а
+  replicas: 4 # Kubernetes поддерживает 2 Pod'а
+  selector:
+    matchLabels:
+      app: payment-service # Deployment/ReplicaSet управляет только Pod'ами с этой меткой
+  revisionHistoryLimit: 5 # сколько хранить старых ReplicaSet для rollback
+  template: # Шаблон Pod'а, по которому создаются все реплики
+    metadata:
+      labels:
+        app: payment-service
+    spec:
+      containers:
+        - name: payment-service
+          image: gitlab.example.local:5050/root/diploma/payment-service:latest
+          imagePullPolicy: Always # по умолчанию тянем образ из GitLab Registry; в CI тег перезаписывается на commit SHA
+          ports:
+            - containerPort: 8080 # Контейнер слушает порт 8080 (внутри Pod)
+          startupProbe: # Проба старта: проверяет, что приложение вообще поднялось
+            httpGet: # Тип проверки — HTTP GET-запрос
+              path: /health # Эндпоинт для проверки старта приложения
+              port: 8080 # Порт контейнера, куда отправляется проверка
+            failureThreshold: 30 # Сколько подряд неудач допускается до провала startupProbe
+            periodSeconds: 10 # Интервал между проверками startupProbe (в секундах)
+          readinessProbe: # Проба готовности: можно ли направлять трафик в Pod
+            httpGet: # Тип проверки — HTTP GET-запрос
+              path: /ready # Эндпоинт готовности приложения/зависимостей
+              port: 8080 # Порт контейнера для readiness-проверки
+            initialDelaySeconds: 5 # Задержка перед первой readiness-проверкой после старта контейнера
+            periodSeconds: 15 # Интервал между readiness-проверками (в секундах)
+            failureThreshold: 3 # После скольких подряд неудач Pod станет NotReady
+          livenessProbe: # Проба живости: не зависло ли приложение
+            httpGet: # Тип проверки — HTTP GET-запрос
+              path: /health # Эндпоинт для проверки, что процесс жив
+              port: 8080 # Порт контейнера для liveness-проверки
+            initialDelaySeconds: 10 # Задержка перед первой liveness-проверкой после старта контейнера
+            periodSeconds: 20 # Интервал между liveness-проверками (в секундах)
+            failureThreshold: 3 # После скольких подряд неудач контейнер будет перезапущен
+          resources: # Ресурсные ограничения и гарантии для контейнера
+            requests: # Минимум ресурсов, который Kubernetes резервирует при планировании Pod
+              cpu: "50m" # Запрос CPU: 50 millicpu = 0.05 vCPU
+              memory: "64Mi" # Запрос памяти: 64 mebibytes
+            limits: # Максимум ресурсов, который контейнер может использовать
+              cpu: "300m" # Лимит CPU: до 300 millicpu = 0.3 vCPU чтоб параллельно надо указывать несколько cpu: "3000m" или "3"
+              memory: "256Mi" # Лимит памяти: 256 mebibytes; при превышении возможен OOMKilled
+          env:
+            - name: APP_PORT
+              value: "8080"
+            - name: NOTIFICATION_GRPC_ADDR
+              value: "notification-service:9090"
+            - name: DB_HOST
+              value: "postgres" # пока PostgreSQL в k8s не поднят, Pod может падать
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: "payments_db"
+            - name: DB_USER
+              value: "payment_user"
+            - name: DB_PASSWORD
+              value: "payment_password"

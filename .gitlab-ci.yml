@@ -1,0 +1,168 @@
+# stages: порядок этапов пайплайна; следующий этап стартует только после успешного предыдущего.
+stages:
+  # test: запускаем проверки кода.
+  - test
+  # build: собираем контейнерные образы и пушим в GitLab Container Registry.
+  - build
+  # deploy: выкатываем в Kubernetes.
+  - deploy
+
+# default: общие настройки для всех job, если не переопределены локально.
+default:
+  # tags: runner tag для выбора нужного GitLab Runner.
+  tags:
+    # docker: запускать job на runner с Docker executor.
+    - docker
+
+# variables: глобальные переменные для всех job.
+variables:
+  # GO_VERSION: версия Go для test job.
+  GO_VERSION: "1.25"
+  # PAYMENT_IMAGE: полный путь + тег образа payment-service в Registry.
+  PAYMENT_IMAGE: "$CI_REGISTRY_IMAGE/payment-service:$CI_COMMIT_SHORT_SHA"
+  # PAYMENT_IMAGE_LATEST: стабильный тег latest для базового манифеста Kubernetes.
+  PAYMENT_IMAGE_LATEST: "$CI_REGISTRY_IMAGE/payment-service:latest"
+  # NOTIFICATION_IMAGE: полный путь + тег образа notification-service в Registry.
+  NOTIFICATION_IMAGE: "$CI_REGISTRY_IMAGE/notification-service:$CI_COMMIT_SHORT_SHA"
+  # NOTIFICATION_IMAGE_LATEST: стабильный тег latest для базового манифеста Kubernetes.
+  NOTIFICATION_IMAGE_LATEST: "$CI_REGISTRY_IMAGE/notification-service:latest"
+
+# test:payment-service: тесты payment-service.
+test:payment-service:
+  # stage: выполняется на этапе test.
+  stage: test
+  # image: контейнерная среда с Go.
+  image: golang:${GO_VERSION}
+  # script: команды job.
+  script:
+    # перейти в директорию payment-service.
+    - cd payment-service
+    # запустить все go-тесты модуля.
+    - go test ./...
+
+# test:notification-service: тесты notification-service.
+test:notification-service:
+  # stage: выполняется на этапе test.
+  stage: test
+  # image: контейнерная среда с Go.
+  image: golang:${GO_VERSION}
+  # script: команды job.
+  script:
+    # перейти в директорию notification-service.
+    - cd notification-service
+    # запустить все go-тесты модуля.
+    - go test ./...
+
+# build:payment-service: сборка и push образа payment-service в Registry.
+build:payment-service:
+  # stage: выполняется после тестов на этапе build.
+  stage: build
+  # resource_group: общий mutex, чтобы build job не выполнялись параллельно.
+  resource_group: docker-build
+  # image: Docker CLI для сборки и push.
+  image: docker:27
+  # services: Docker-in-Docker демон для docker build/push внутри job.
+  services:
+    - name: docker:27-dind
+      command: ["--insecure-registry=gitlab.example.local:5050"]
+  # variables: переменные, нужные только для build job.
+  variables:
+    # DOCKER_HOST: адрес docker daemon из dind-сервиса.
+    DOCKER_HOST: tcp://docker:2375
+    # DOCKER_TLS_CERTDIR: отключаем TLS для упрощенного dind в учебном стенде.
+    DOCKER_TLS_CERTDIR: ""
+  # script: логин в Registry, сборка образа и push.
+  script:
+    # логин в GitLab Container Registry через CI-переменные.
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    # собрать образ payment-service с тегом текущего коммита.
+    - docker build -t "$PAYMENT_IMAGE" ./payment-service
+    # добавить дополнительный тег latest для дефолтного образа в k8s-манифесте.
+    - docker tag "$PAYMENT_IMAGE" "$PAYMENT_IMAGE_LATEST"
+    # отправить образ в Registry.
+    - docker push "$PAYMENT_IMAGE"
+    # отправить тег latest в Registry.
+    - docker push "$PAYMENT_IMAGE_LATEST"
+  # rules: запускать build только в ветке master.
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+
+# build:notification-service: сборка и push образа notification-service в Registry.
+build:notification-service:
+  # stage: выполняется после тестов на этапе build.
+  stage: build
+  # resource_group: общий mutex, чтобы build job не выполнялись параллельно.
+  resource_group: docker-build
+  # image: Docker CLI для сборки и push.
+  image: docker:27
+  # services: Docker-in-Docker демон для docker build/push внутри job.
+  services:
+    - name: docker:27-dind
+      command: ["--insecure-registry=gitlab.example.local:5050"]
+  # variables: переменные, нужные только для build job.
+  variables:
+    # DOCKER_HOST: адрес docker daemon из dind-сервиса.
+    DOCKER_HOST: tcp://docker:2375
+    # DOCKER_TLS_CERTDIR: отключаем TLS для упрощенного dind в учебном стенде.
+    DOCKER_TLS_CERTDIR: ""
+  # script: логин в Registry, сборка образа и push.
+  script:
+    # логин в GitLab Container Registry через CI-переменные.
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    # собрать образ notification-service с тегом текущего коммита.
+    - docker build -t "$NOTIFICATION_IMAGE" ./notification-service
+    # добавить дополнительный тег latest для дефолтного образа в k8s-манифесте.
+    - docker tag "$NOTIFICATION_IMAGE" "$NOTIFICATION_IMAGE_LATEST"
+    # отправить образ в Registry.
+    - docker push "$NOTIFICATION_IMAGE"
+    # отправить тег latest в Registry.
+    - docker push "$NOTIFICATION_IMAGE_LATEST"
+  # rules: запускать build только в ветке master.
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+
+# deploy:k8s: деплой в Kubernetes после успешного build.
+deploy:k8s:
+  # stage: выполняется на этапе deploy.
+  stage: deploy
+  # variables: переменные только для deploy job.
+  variables:
+    # KUBECONFIG: путь к kubeconfig внутри контейнера bitnami/kubectl.
+    KUBECONFIG: /opt/bitnami/.kube/config
+  # image: контейнерная среда с kubectl.
+  image:
+    # name: образ с kubectl.
+    name: bitnami/kubectl:latest
+    # entrypoint: очищаем ENTRYPOINT, чтобы GitLab выполнил script через shell.
+    entrypoint: [""]
+  # rules: запускать deploy только в ветке master.
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+  # script: последовательность шагов деплоя.
+  script:
+    # создать namespace payments (или обновить, если уже существует).
+    - kubectl apply -f payment-service/k8s/01-namespace.yaml
+    # создать/обновить secret для pull приватных образов из GitLab Registry.
+    - kubectl create secret docker-registry gitlab-registry --docker-server="$CI_REGISTRY" --docker-username="$CI_REGISTRY_USER" --docker-password="$CI_REGISTRY_PASSWORD" --docker-email="ci@example.local" -n payments --dry-run=client -o yaml | kubectl apply -f -
+    # привязать imagePullSecret к default serviceaccount namespace payments.
+    - kubectl patch serviceaccount default -n payments -p '{"imagePullSecrets":[{"name":"gitlab-registry"}]}'
+    # применить ресурсы Postgres (secret/configmap/deployment/service).
+    - kubectl apply -f payment-service/k8s/08-postgres.yaml
+    # применить job инициализации таблицы notification-service.
+    - kubectl apply -f notification-service/k8s/02-notification-db-init-job.yaml
+    # применить deployment notification-service.
+    - kubectl apply -f notification-service/k8s/03-notification-deployment.yaml
+    # применить сервисы notification-service.
+    - kubectl apply -f notification-service/k8s/04-notification-services.yaml
+    # применить deployment payment-service.
+    - kubectl apply -f payment-service/k8s/09-payment-deployment.yaml
+    # применить сервисы payment-service/postgres external.
+    - kubectl apply -f payment-service/k8s/10-external-services.yaml
+    # заменить image notification-service на свежий тег из Registry.
+    - kubectl set image deployment/notification-service notification-service="$NOTIFICATION_IMAGE" -n payments
+    # заменить image payment-service на свежий тег из Registry.
+    - kubectl set image deployment/payment-service payment-service="$PAYMENT_IMAGE" -n payments
+    # дождаться успешного rollout notification-service.
+    - kubectl rollout status deployment/notification-service -n payments --timeout=180s
+    # дождаться успешного rollout payment-service.
+    - kubectl rollout status deployment/payment-service -n payments --timeout=180s

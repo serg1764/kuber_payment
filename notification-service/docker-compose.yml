@@ -1,0 +1,31 @@
+services:
+  notification-postgres:
+    image: postgres:16
+    container_name: notification-postgres
+    environment:
+      POSTGRES_DB: notifications_db
+      POSTGRES_USER: notification_user
+      POSTGRES_PASSWORD: notification_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - notification_postgres_data:/var/lib/postgresql/data
+
+  notification-service:
+    build: .
+    container_name: notification-service
+    ports:
+      - "9090:9090"
+    environment:
+      GRPC_PORT: "9090"
+      DB_HOST: notification-postgres
+      DB_PORT: "5432"
+      DB_NAME: notifications_db
+      DB_USER: notification_user
+      DB_PASSWORD: notification_password
+    depends_on:
+      - notification-postgres
+
+volumes:
+  notification_postgres_data:

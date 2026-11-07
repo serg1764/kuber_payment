@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: notification-db-init
+  namespace: payments
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: psql-init
+          image: postgres:16
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+          command:
+            - sh
+            - -c
+            - |
+              psql \
+                -h postgres \
+                -U payment_user \
+                -d payments_db \
+                -v ON_ERROR_STOP=1 \
+                -c "CREATE TABLE IF NOT EXISTS payment_status_notifications (id SERIAL PRIMARY KEY, payment_id BIGINT NOT NULL, order_id BIGINT NOT NULL, status VARCHAR(50) NOT NULL, provider VARCHAR(50) NOT NULL, event_time TIMESTAMP NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT NOW());"

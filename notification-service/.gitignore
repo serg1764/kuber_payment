@@ -1,0 +1,13 @@
+# Go build cache
+.cache/
+**/.cache/
+.gocache/
+**/.gocache/
+
+# Go build artifacts
+bin/
+*.exe
+*.test
+
+# Local env files
+.env

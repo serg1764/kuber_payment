@@ -1,0 +1,56 @@
+// Используем proto3 как актуальную версию синтаксиса Protocol Buffers.
+syntax = "proto3";
+
+// package задает логическое пространство имен контракта и его версию.
+package notification.v1;
+
+// go_package задает путь notification-service/gen/notification
+// и alias notificationpb пакета для сгенерированного Go-кода.
+option go_package = "notification-service/gen/notification;notificationpb";
+
+// NotificationService описывает gRPC-контракт для записи и чтения статусов платежа.
+service NotificationService {
+
+  // SendPaymentStatus сохраняет один статус платежа в хранилище notification-service.
+  rpc SendPaymentStatus(SendPaymentStatusRequest) returns (SendPaymentStatusResponse);
+
+  // GetPaymentStatusesByPaymentId возвращает историю статусов по конкретному payment_id.
+  rpc GetPaymentStatusesByPaymentId(GetPaymentStatusesByPaymentIdRequest) returns (GetPaymentStatusesByPaymentIdResponse);
+}
+
+// SendPaymentStatusRequest содержит данные события статуса платежа для сохранения.
+message SendPaymentStatusRequest {
+  int64 payment_id = 1;
+  int64 order_id = 2;
+  string status = 3;
+  string provider = 4;
+  string event_time = 5;
+}
+
+// SendPaymentStatusResponse возвращает результат операции сохранения.
+message SendPaymentStatusResponse {
+  bool ok = 1;
+  int64 notification_id = 2;
+}
+
+// GetPaymentStatusesByPaymentIdRequest запрашивает историю по payment_id.
+message GetPaymentStatusesByPaymentIdRequest {
+  int64 payment_id = 1;
+}
+
+// PaymentStatusRecord описывает одну запись истории статуса платежа.
+message PaymentStatusRecord {
+  int64 id = 1;
+  int64 payment_id = 2;
+  int64 order_id = 3;
+  string status = 4;
+  string provider = 5;
+  string event_time = 6;
+  string created_at = 7;
+}
+
+// GetPaymentStatusesByPaymentIdResponse возвращает список найденных записей.
+message GetPaymentStatusesByPaymentIdResponse {
+  // items - список из 0..N записей истории статусов для указанного payment_id.
+  repeated PaymentStatusRecord items = 1;
+}

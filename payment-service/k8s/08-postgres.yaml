@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: payments
+type: Opaque
+stringData:
+  POSTGRES_USER: payment_user
+  POSTGRES_PASSWORD: payment_password
+  POSTGRES_DB: payments_db
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-sql
+  namespace: payments
+data:
+  init.sql: |
+    CREATE TABLE payments (
+        id SERIAL PRIMARY KEY,
+        order_id BIGINT NOT NULL,
+        provider VARCHAR(50) NOT NULL,
+        status VARCHAR(50) NOT NULL,
+        amount NUMERIC(12, 2) NOT NULL,
+        currency VARCHAR(3) NOT NULL DEFAULT 'EUR',
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    INSERT INTO payments (order_id, provider, status, amount, currency)
+    VALUES
+        (1001, 'paypal', 'created', 120.50, 'EUR'),
+        (1002, 'stripe', 'paid', 89.99, 'EUR'),
+        (1003, 'klarna', 'failed', 250.00, 'EUR'),
+        (1004, 'payu', 'paid', 310.20, 'EUR');
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_DB
+          volumeMounts:
+            - name: postgres-init-sql
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: postgres-init-sql
+          configMap:
+            name: postgres-init-sql
+            items:
+              - key: init.sql
+                path: init.sql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: payments
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
